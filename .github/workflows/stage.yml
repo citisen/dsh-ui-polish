@@ -1,0 +1,183 @@
+# Stages @citisen/dsh-ui-polish for release — the CI half of the ONLY publishing
+# path once trusted publishing is configured on npm.
+#
+# There is deliberately no `NPM_TOKEN` anywhere in this file. npm trusts this
+# repository and this workflow file via GitHub's OIDC identity, so no
+# long-lived credential exists to steal, leak, or forget to rotate. That trust
+# is configured at
+#   https://www.npmjs.com/package/@citisen/dsh-ui-polish/access
+# and is pinned to the exact workflow filename below; renaming or moving this
+# file breaks publishing until npm is updated to match.
+#
+# This workflow STAGES; it deliberately does not publish. In the trusted
+# publisher's "Allowed actions" the `npm publish` box is left UNCHECKED, so the
+# grant this workflow receives can only stage a tarball. A maintainer then
+# reviews and approves it (`npm run release -- approve <stage-id>`), which
+# requires their 2FA. That human step is the point: a compromised runner, a
+# malicious commit, or a bad dependency in CI cannot put a version on the
+# registry and cannot make it installable. Leaving that box checked would let
+# this workflow publish unattended, which is strictly weaker.
+#
+# Trigger is manual on purpose: staging a release should be a deliberate act,
+# not a side effect of a merge.
+#
+# To release: bump "version" in package.json, commit, tag v<version>, push,
+# then Actions -> Stage release -> Run workflow, and approve the stage.
+
+name: Stage release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dist-tag:
+        description: npm dist-tag the approved release will publish under
+        type: choice
+        options:
+          - latest
+          - next
+          - alpha
+        default: latest
+      confirm:
+        description: Type the version in package.json to confirm (e.g. 0.1.0)
+        required: true
+        type: string
+
+permissions:
+  # Required for the OIDC token npm exchanges for a staging grant.
+  id-token: write
+  contents: read
+
+concurrency:
+  # One staging run at a time; never cancel one mid-flight, which could leave a
+  # stage in a state no local checkout knows about.
+  group: stage-npm
+  cancel-in-progress: false
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    # A protected environment lets you require reviewers before staging even
+    # starts. Create one named exactly this in repo Settings -> Environments,
+    # or delete this line to skip the gate.
+    environment: npm-publish
+    steps:
+      - name: Check out the exact commit being released
+        uses: actions/checkout@v4
+        with:
+          # Full history, so the annotated-tag ancestry check below can run.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          # Node 24 is current LTS and satisfies npm 12's engine range, which
+          # is what provides `npm stage`.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install the npm CLI that can stage
+        run: |
+          set -euo pipefail
+          # Pinned to a major so a surprise release cannot change what runs.
+          npm install --global npm@12
+          npm --version
+
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          # The host half imports @deepseek-ai/schemastery as a real runtime
+          # dependency. dsh supplies it to a plugin at runtime, but the
+          # verification steps below import the host half directly, so it must
+          # be installed here too -- without this the gate dies with
+          # ERR_MODULE_NOT_FOUND and no release can ever stage.
+          npm ci
+
+      - name: Read and confirm the version
+        id: version
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "package.json version: $version"
+          if [ "$CONFIRM" != "$version" ]; then
+            echo "::error::confirmation '$CONFIRM' does not match package.json version '$version'"
+            exit 1
+          fi
+
+      - name: Verify the shipped artifacts
+        run: |
+          set -euo pipefail
+          # Fails if lib/client.js does not match src/client.js, then exercises
+          # the envelope, the fixes, the settings row, and the host half. This is
+          # the same gate a local release runs.
+          npm run check
+
+      - name: Refuse a version that is published or already staged
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if npm view "@citisen/dsh-ui-polish@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::@citisen/dsh-ui-polish@$VERSION is already published — bump package.json"
+            exit 1
+          fi
+          if npm stage list "@citisen/dsh-ui-polish" 2>/dev/null | grep -qF "$VERSION"; then
+            echo "::error::@citisen/dsh-ui-polish@$VERSION is already staged — approve or reject it first"
+            exit 1
+          fi
+          echo "@citisen/dsh-ui-polish@$VERSION is neither published nor staged"
+
+      - name: Require a tag for a latest release
+        if: inputs.dist-tag == 'latest'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # `--points-at` matches a tag on this exact commit, so a tag left on
+          # an older commit cannot be used to release something newer.
+          if ! git tag --points-at HEAD | grep -qx "v$VERSION"; then
+            echo "::error::no tag v$VERSION on $GITHUB_SHA — tag the release commit first"
+            exit 1
+          fi
+
+      - name: Drop any registry credential from the runner
+        run: |
+          set -euo pipefail
+          # Fail closed if someone later adds a token: with trusted publishing
+          # the OIDC exchange is the only intended path, and a stray token would
+          # silently take precedence.
+          rm -f "$HOME/.npmrc" .npmrc
+          unset NODE_AUTH_TOKEN NPM_TOKEN
+          npm config set registry https://registry.npmjs.org/
+
+      - name: Stage
+        id: stage
+        env:
+          DIST_TAG: ${{ inputs.dist-tag }}
+        run: |
+          set -euo pipefail
+          # No --provenance: npm attaches provenance automatically for a
+          # trusted stage/publish.
+          npm stage publish --tag "$DIST_TAG"
+          echo "staged $(node -p "require('./package.json').name + '@' + require('./package.json').version")"
+
+      - name: Summarize
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DIST_TAG: ${{ inputs.dist-tag }}
+        run: |
+          {
+            echo "## Staged: \`@citisen/dsh-ui-polish@$VERSION\` (dist-tag \`$DIST_TAG\`)"
+            echo
+            echo "Nothing is installable yet. A maintainer must approve the stage,"
+            echo "which requires their 2FA:"
+            echo
+            echo '```sh'
+            echo "npm run release -- list"
+            echo "npm run release -- approve <stage-id>"
+            echo '```'
+            echo
+            echo "Or: https://www.npmjs.com/package/@citisen/dsh-ui-polish"
+          } >> "$GITHUB_STEP_SUMMARY"

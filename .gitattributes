@@ -1,0 +1,5 @@
+# The client bundle is a generated artifact whose bytes are compared verbatim
+# by `npm run check` (and hashed by dsh-client-hmr). Checkout-time line-ending
+# translation would make a Windows checkout differ from a Linux one, so keep
+# everything as it was committed.
+* text=auto eol=lf

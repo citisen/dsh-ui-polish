@@ -1,0 +1,7 @@
+# Local Node resolution for the verification scripts only. DSH supplies
+# `@deepseek-ai/schemastery` at runtime from the profile's module fallback, so
+# this directory is a development convenience and is never shipped.
+node_modules/
+
+# npm pack output
+*.tgz

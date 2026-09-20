@@ -1,0 +1,83 @@
+{
+  "name": "@citisen/dsh-ui-polish",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin collection: small usability fixes for the Web GUI (first fix: the mouse wheel passes through the conversation's transparent width handles)",
+  "type": "module",
+  "license": "MIT",
+  "author": "citisen",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/citisen/dsh-ui-polish.git"
+  },
+  "homepage": "https://github.com/citisen/dsh-ui-polish#readme",
+  "bugs": {
+    "url": "https://github.com/citisen/dsh-ui-polish/issues"
+  },
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "cordis.patch.yml",
+    "src",
+    "scripts",
+    "README.md",
+    "README.zh.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build-client.mjs",
+    "watch": "node scripts/build-client.mjs --watch",
+    "verify": "node scripts/verify-host.mjs && node scripts/verify-client.mjs",
+    "check": "node scripts/build-client.mjs --check && npm run verify",
+    "check:all": "npm run check && node scripts/verify-profile.mjs",
+    "release": "node scripts/release.mjs",
+    "prepublishOnly": "npm run check"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    }
+  },
+  "keywords": [
+    "deepseek-harness",
+    "deepseek",
+    "dsh",
+    "dsh-plugin",
+    "dsh-bundle",
+    "web-ui",
+    "web-gui",
+    "ui-polish",
+    "usability",
+    "wheel",
+    "scroll",
+    "scroll-chaining",
+    "width-handle",
+    "drag-handle",
+    "conversation",
+    "layout"
+  ],
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.2"
+  }
+}

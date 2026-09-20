@@ -1,0 +1,19 @@
+# dsh-ui-polish bundle patch — the layer this package contributes to a dsh profile.
+#
+# A bundle layer is a top-level YAML array of loader patch entries applied over
+# the layers before it (`dsh-base`, `dsh-web-app`, then the profile's own
+# cordis.patch.yml). This patch only inserts one row, so it composes with any
+# other ordering.
+#
+# The inserted row is the plugin's host half. It is also the row the browser
+# roster is keyed on: `@deepseek-ai/dsh-client-modules` scans the live loader
+# entries for packages declaring `dsh.client`, finds this one, and serves
+# `exports["./client"]` (`lib/client.js`) into the Web GUI.
+#
+# The quote around `name` is required: a bare YAML scalar may not start with
+# `@`. The id is deliberately short and stable — remove or disable a row by id
+# from a later layer, and never mount this package through two loader entries.
+
+- insert:
+    - id: polish
+      name: '@citisen/dsh-ui-polish'
