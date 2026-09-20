@@ -145,8 +145,8 @@ is why this step is worth doing deliberately.
 ```sh
 # on main, through a PR
 npm version patch --no-git-tag-version   # or minor / major
-git commit -am "Release v0.1.1"
-git tag v0.1.1
+git commit -am "Release v0.1.2"
+git tag v0.1.2
 git push --follow-tags
 ```
 

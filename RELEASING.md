@@ -4,11 +4,14 @@ The runbook for changing the plugin and getting it to users. For the *why*
 behind the setup (and what it does not protect against), see
 [PUBLISHING.md](PUBLISHING.md).
 
-The next version to ship is **0.1.1** — `0.1.0` is the published `latest`,
-released by hand once because trusted publishing is configured on a package that
-already exists (see [Bootstrapping](#bootstrapping-the-first-release)). Every
-release from here on goes through CI staging, and a local `npm publish` should
-now fail — that is the point of the setup, not a problem with it.
+The next version to ship is **0.1.2** — `0.1.1` is the published `latest`, and it
+was the first release staged by CI and approved from there, so the OIDC path is
+no longer merely configured: it has run, and it produced a tarball with
+provenance attached. `0.1.0` was published by hand once, before trusted
+publishing could be configured for it (see
+[Bootstrapping](#bootstrapping-the-first-release)). Every release from here goes
+through staging, and a local `npm publish` failing is the setup working rather
+than the setup broken.
 
 ## The short version
 
@@ -30,8 +33,8 @@ gh pr create --fill && gh pr merge --squash --delete-branch
 
 # 5. tag the merged commit, then stage
 git checkout main && git pull --ff-only
-git tag v0.1.0 && git push origin v0.1.0
-gh workflow run stage.yml --ref main -f dist-tag=latest -f confirm=0.1.0
+git tag v0.1.2 && git push origin v0.1.2
+gh workflow run stage.yml --ref main -f dist-tag=latest -f confirm=0.1.2
 
 # 6. review, then approve (this is the only step that publishes)
 npm run release -- list                  # find the stage-id
@@ -125,8 +128,8 @@ or rebase rather than merge-commit.
 ### 5. Tag, then stage
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
-gh workflow run stage.yml --ref main -f dist-tag=latest -f confirm=0.1.0
+git tag v0.1.2 && git push origin v0.1.2
+gh workflow run stage.yml --ref main -f dist-tag=latest -f confirm=0.1.2
 ```
 
 The `confirm` input must equal `package.json`'s version exactly — it exists to
