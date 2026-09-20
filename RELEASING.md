@@ -4,9 +4,11 @@ The runbook for changing the plugin and getting it to users. For the *why*
 behind the setup (and what it does not protect against), see
 [PUBLISHING.md](PUBLISHING.md).
 
-The next version to ship is **0.1.0** — nothing of this package has been
-published yet, so the first release has one extra step that later ones do not
-(see [Bootstrapping](#bootstrapping-the-first-release)).
+The next version to ship is **0.1.1** — `0.1.0` is the published `latest`,
+released by hand once because trusted publishing is configured on a package that
+already exists (see [Bootstrapping](#bootstrapping-the-first-release)). Every
+release from here on goes through CI staging, and a local `npm publish` should
+now fail — that is the point of the setup, not a problem with it.
 
 ## The short version
 
@@ -41,6 +43,10 @@ npm view @citisen/dsh-ui-polish dist-tags
 ```
 
 ## Bootstrapping the first release
+
+*Already done for `0.1.0`.* Kept for two reasons: a new package in this series
+needs the same three steps, and it is the record of why a local publish must no
+longer be possible.
 
 Trusted publishing is configured on a package's **own settings page**, so a
 package that does not exist yet cannot be configured for it. The first release is
