@@ -98,11 +98,40 @@ enabled. Remove the `//registry.npmjs.org/:_authToken=...` line from `~/.npmrc`
 on every machine once you stop releasing by hand.
 
 Skipping this leaves the old door open — the OIDC path being locked down says
-nothing about a token that is still live. Verify the reduction is real:
+nothing about a token that is still live.
 
-```sh
-npm publish --dry-run --access public   # a plain publish must now fail
+**`npm publish --dry-run` cannot verify this.** Trusting it is the trap this
+paragraph used to set: a dry run packs the tarball locally and reports, and npm
+deliberately downgrades even a *missing credential* to a warning in that mode —
+from its own `lib/commands/publish.js`:
+
+```js
+if (noCreds) {
+  const msg = `This command requires you to be logged in to ${outputRegistry}`
+  if (dryRun) {
+    log.warn(this.#command, `${msg} (dry-run)`)
+  } else {
+    throw Object.assign(new Error(msg), { code: 'ENEEDAUTH' })
+  }
+}
 ```
+
+A dry run does catch a version that is already published (it reads the packument
+first), which is worth knowing — but it says nothing about who may write.
+
+Verify the reduction where the setting actually lives:
+
+- The package page's **Settings → Publishing access** reads *Require two-factor
+  authentication and disallow tokens*.
+- The token page lists no **Automation** or **Granular** token with publish
+  rights for this scope, and `~/.npmrc` has no `registry.npmjs.org` auth token
+  left on a machine you release from.
+
+The only *dynamic* proof is a real publish that fails, and that is not worth
+running against a live package. It is also unnecessary: with tokens disallowed,
+the OIDC grant plus a human approval is the only path that can put a version on
+the registry — which is exactly what the staging workflow exercises on every
+release, and what the first CI staging run of this package demonstrated.
 
 ### 3. Optionally gate staging on a reviewer
 
