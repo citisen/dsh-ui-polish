@@ -2,6 +2,25 @@
 
 [English](README.md) | 中文
 
+## 已废弃 —— dsh 自己就会做这件事了
+
+**本包已冻结：不要装，装了请卸掉。** 它唯一的行为已经被 dsh 吸收：从
+`0.1.7-alpha.1` 起，对话自带的调宽手柄自己就转交滚轮 —— `WidthHandle` 渲染时挂了
+`onWheel`，会滚动它旁边的 `[data-conversation-scroll]` —— 所以下面那个 fix 在新线上是多余的，
+而且**开关打开时会把这同一段滚轮位移花掉两次**。不会再发布新版本。
+
+卸掉它只需要在 profile 的 patch 层（`$DSH_HOME/profiles/web/cordis.patch.yml`）写一行：
+
+```yaml
+- id: ui-polish
+  disabled: true
+```
+
+再把 `@citisen/dsh-ui-polish` 从 `$DSH_HOME/profiles/<name>/package.json` 的
+`dsh.profile.bundles` 里去掉（或执行 `dsh plugin --profile web remove @citisen/dsh-ui-polish`）。
+在 `0.1.5-rc.x` 上这个 fix 仍然有用 —— 没有它，鼠标停在那两条手柄上滚轮不会滚动 —— 所以在旧线上卸掉
+它只是偏好，不是修复。
+
 ## dsh 起不来怎么办
 
 你正在看的报错就是这三行 ——

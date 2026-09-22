@@ -173,10 +173,14 @@ assert.ok(
 // ── the strip selector ──────────────────────────────────────────────────────
 // A fake element that answers `closest` the way the browser would for a node
 // whose own attributes match.
-function fakeHandle(attributes) {
+function fakeHandle(attributes, body = { querySelector: () => null }) {
   return {
     nodeType: 1,
     attributes,
+    // The line that needs this plugin: the strip's parent holds no scroll element
+    // of its own, so nothing but this bridge hands the wheel over. A dsh whose
+    // handle does own the wheel hands in a body that answers with one.
+    parentElement: body,
     contains: () => false,
     closest(selector) {
       const wanted = selector.split(',')
@@ -271,6 +275,7 @@ assert.equal(
   plugin.wheelPlan({ ...event, target: 'elsewhere' }, planDom({ strip, under: ['scroller'] })),
   undefined,
 )
+
 // Ctrl+wheel is the browser's zoom.
 assert.equal(plugin.wheelPlan({ ...event, ctrlKey: true }, planDom({ strip, under: [scrollerStub(0, 1000, 400)] })), undefined)
 // A horizontal-only wheel over the strip has nothing to forward vertically.
@@ -344,7 +349,19 @@ function installDocumentStub({ under, overflowY = 'auto' }) {
   }
   listener(wheel)
   assert.equal(prevented, 1, 'the event the bridge takes over must be cancelled')
-  assert.equal(scroller.scrollTop, 220, 'and the scroll must actually happen')
+  // The scroll waits for the rest of the dispatch: a host that also bridges the wheel
+  // gets its chance first, and this one took none.
+  assert.equal(scroller.scrollTop, 100, 'nothing scrolls until the dispatch is over')
+  await Promise.resolve()
+  assert.equal(scroller.scrollTop, 220, 'and then the scroll actually happens')
+
+  // The host bridged it itself (0.1.7's `WidthHandle`): the movement must not be
+  // spent twice, which is what the deferred step checks for.
+  scroller.scrollTop = 100
+  listener(wheel)
+  scroller.scrollTop = 220
+  await Promise.resolve()
+  assert.equal(scroller.scrollTop, 220, 'a host that scrolled first must not be added to')
 
   // An event over the transcript itself is not ours: no cancel, no scroll.
   prevented = 0
@@ -615,19 +632,25 @@ const ctx = {
 // ── the 0.1.7 line: the entry's own configuration form ──────────────────────
 //
 // There the section is addressed by Loader entry id (`ui-polish`, the row the
-// bundle patch inserts) and read through `configForms`, whose snapshot carries the
-// stored section rather than decoded switches. A stored switch must reach the
-// fixes, and a flipped switch must reach the form — that is the whole of "the
-// toggles work on 0.1.7".
+// bundle patch inserts) and read through `configForms`. Its snapshot carries the
+// settings in layers — `value` is what the entry runs with, `user` is the profile
+// patch the user edited — and a write lands in `user`. A row that read `value`
+// alone would show the shipped defaults on every open, refuse to move (its repaint
+// after a write would show the old value again) and apply nothing, which is
+// exactly what shipped once. So both layers are modelled here, with the fix's
+// default in one and the user's override in the other.
 {
   const formWrites = []
   const formSlots = []
-  let formValue = { wheelThroughWidthHandle: false }
+  const running = { wheelThroughWidthHandle: true }
+  let userLayer = { wheelThroughWidthHandle: false }
 
   const form = {
     getSnapshot: () => ({
       status: 'ready',
-      value: formValue,
+      value: running,
+      base: running,
+      user: userLayer,
       revision: 6,
       writable: true,
       mode: 'host',
@@ -638,7 +661,7 @@ const ctx = {
     },
     set: (field, value) => {
       formWrites.push({ op: 'set', field, value })
-      formValue = { ...formValue, [field]: value }
+      userLayer = { ...userLayer, [field]: value }
       // A committed write folds its answer back into the shared mirror, which is
       // what notifies subscribers in the browser: without this the fixture would
       // only ever test the write half of the contract.
@@ -647,8 +670,8 @@ const ctx = {
     },
     unset: (field) => {
       formWrites.push({ op: 'unset', field })
-      const { [field]: _removed, ...kept } = formValue
-      formValue = kept
+      const { [field]: _removed, ...kept } = userLayer
+      userLayer = kept
       formListener?.()
       return Promise.resolve(true)
     },
@@ -685,11 +708,13 @@ const ctx = {
     },
   }
 
-  // The stored `false` must reach the fix: the switch is off, so nothing installs.
+  // The user's layer says off, and the entry runs with on: the switch must be
+  // read as off, so nothing installs. Reading `value` alone passes this fixture
+  // only if the layer is ignored — which is the bug this case exists to catch.
   const { added, removed } = installDocumentStub({ under: [] })
   plugin.apply(formCtx)
   assert.equal(formSlots.length, 1, 'the row must register against the 0.1.7 line')
-  assert.equal(added.length, 0, 'a stored switch that is off must not install its fix')
+  assert.equal(added.length, 0, "the user's `false` must reach the fixes, not the running default")
 
   // Flipping it on writes through the form, and the fix follows.
   const actions = formSlots[0].inject(formSlots[0].store.create())
@@ -701,11 +726,13 @@ const ctx = {
   })
   assert.equal(added.length, 1, 'turning it on through the form must install the fix')
 
-  // Reset clears it, and the default brings the fix back without another write.
+  // Clearing the override hands the field back to the running value, so the fix
+  // returns without another write; flipping it off first is what disposes it.
   actions.setField('wheelThroughWidthHandle', false)
+  assert.equal(removed.length, 1, 'turning it off again must dispose the fix')
   actions.reset()
   assert.deepEqual(formWrites.at(-1), { op: 'unset', field: 'wheelThroughWidthHandle' })
-  assert.equal(removed.length, 1, 'the fix that was on must be disposed')
+  assert.equal(added.length, 2, 'clearing the override must fall back to the running value')
 }
 
 delete globalThis.document

@@ -2,6 +2,29 @@
 
 [English](README.md) | 中文
 
+## Deprecated — dsh does this itself now
+
+**Frozen. Do not install it, and take it out if you have it.** dsh grew the one
+behaviour this package carried: since `0.1.7-alpha.1` the conversation's own width
+handle bridges the wheel itself — `WidthHandle` renders with an `onWheel` that
+scrolls the `[data-conversation-scroll]` beside it — so the fix below is redundant
+there, and **with its switch on it would spend the same wheel movement twice**.
+No further version will be published.
+
+Removing it takes one line in the profile's patch layer
+(`$DSH_HOME/profiles/web/cordis.patch.yml`):
+
+```yaml
+- id: ui-polish
+  disabled: true
+```
+
+Then drop `@citisen/dsh-ui-polish` from `dsh.profile.bundles` in
+`$DSH_HOME/profiles/<name>/package.json` (or run
+`dsh plugin --profile web remove @citisen/dsh-ui-polish`). On `0.1.5-rc.x` the fix
+still does something — the wheel over the strips does nothing without it — so
+removing it there is a preference rather than a repair.
+
 ## If dsh will not boot
 
 The three lines you are looking at are these —
