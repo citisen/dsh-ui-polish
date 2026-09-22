@@ -464,23 +464,30 @@ let scopeRevision = 1
 
 const settingsScopeService = { bind: (spec) => (assert.equal(spec.namespace, 'ui-polish'), scope) }
 
+/**
+ * The services this fixture's composition provides, as cordis would resolve them.
+ *
+ * This is the 0.1.5-rc.x line: a registered namespace scope, and no configuration
+ * form. The case at the end of this file hands the plugin the other line instead.
+ */
+const services = { settingsScope: settingsScopeService }
+
 const ctx = {
   effect: (execute) => {
     const disposer = execute()
     return { dispose: typeof disposer === 'function' ? disposer : () => undefined }
   },
   on: () => undefined,
-  get: (name) => (name === 'settingsScope' ? settingsScopeService : undefined),
-  // The optional bind under test: the service is present here, so the callback
-  // runs as it does in the browser. `settingsScope` stays on the fixture context
-  // as well, because that is the context a bound scope is read from.
+  get: (name) => services[name],
+  // Cordis runs an injection only when the composition provides every dependency,
+  // so the fixture does the same. That is what makes handing it `configForms`
+  // instead a real test of the other line rather than of the same path twice.
   inject: (deps, callback) => {
-    assert.deepEqual(deps, ['settingsScope'])
-    callback(ctx)
-    return { dispose: () => undefined }
+    if (!deps.every((dep) => services[dep] !== undefined)) return { dispose: () => undefined }
+    return callback(ctx) ?? { dispose: () => undefined }
   },
   locale,
-  settingsScope: settingsScopeService,
+  ...services,
   slots: {
     inject: (name, callback) => {
       assert.equal(name, 'settings.general.item')
@@ -550,46 +557,34 @@ const ctx = {
   assert.equal(added.length, 3, 'the fix returns on the default')
 }
 
-// ── a composition that provides no `settingsScope` ──────────────────────────
+// ── a composition that speaks neither settings API ──────────────────────────
 //
-// dsh 0.1.7-alpha.1 replaced the Web client's settings service with
-// `configForms`. A build that required the old name never activated there at
-// all: the boot audit listed this plugin as an entry that "did not activate",
-// waiting for a service that release does not have. The service is optional now,
-// and this is the composition that must still run the fixes and fill the row,
-// with one honest report — at activation, when the replacement service makes the
-// mismatch visible, and never twice.
+// The two known lines are `settingsScope` (0.1.5-rc.x) and `configForms` (0.1.7+).
+// A dsh with neither — a future rename, or a composition without the settings
+// domain at all — must still activate: an entry that never activates blocks the
+// web boot outright, which is how 0.1.7-alpha.1 turned a renamed service into a
+// "Failed to load plugins" card. The fixes run on their shipped defaults, and the
+// first switch the user touches is what reports why.
 {
-  const incompatibleSlots = []
-  const incompatibleDictionaries = []
+  const bareSlots = []
   const reported = []
-  const replacementOnlyCtx = {
+  const bareCtx = {
     effect: (execute) => {
       const disposer = execute()
       return { dispose: typeof disposer === 'function' ? disposer : () => undefined }
     },
     on: () => undefined,
-    // Only the REPLACEMENT service exists, which is what makes the mismatch
-    // visible without waiting for anything.
-    get: (name) => (name === 'configForms' ? {} : undefined),
-    inject: (deps) => {
-      assert.deepEqual(deps, ['settingsScope'])
-      // And it never arrives: this composition started without it.
-      return { dispose: () => undefined }
-    },
-    locale: {
-      register: (namespace, dict) => {
-        incompatibleDictionaries.push({ namespace, dict })
-        return () => undefined
-      },
-    },
+    get: () => undefined,
+    // Neither service is provided, so cordis never runs either injection.
+    inject: () => ({ dispose: () => undefined }),
+    locale: { register: () => () => undefined },
     slots: {
       inject: (name, callback) => {
         assert.equal(name, 'settings.general.item')
         callback()
       },
-      register: (options, component) => {
-        incompatibleSlots.push({ options, component })
+      register: (options) => {
+        bareSlots.push(options)
         return () => undefined
       },
     },
@@ -599,26 +594,118 @@ const ctx = {
   const realError = console.error
   console.error = (...args) => reported.push(args.join(' '))
   try {
-    plugin.apply(replacementOnlyCtx)
-    assert.equal(reported.length, 1, 'a visible mismatch is reported at activation')
+    plugin.apply(bareCtx)
+    assert.deepEqual(reported, [], 'activation stays quiet: a composition may bind late')
     assert.equal(added.length, 1, 'the shipped defaults must still install the fix')
-    // The writes the row offers must not throw on a scope that never resolves,
-    // and must not repeat a report the page already carries.
-    const actions = incompatibleSlots[0].options.inject(incompatibleSlots[0].options.store.create())
+    const actions = bareSlots[0].inject(bareSlots[0].store.create())
     actions.setField('wheelThroughWidthHandle', false)
     actions.reset()
   } finally {
     console.error = realError
   }
 
-  assert.equal(incompatibleSlots.length, 1, 'the row must register without a settings service')
-  assert.equal(incompatibleDictionaries.length, 1, 'the row copy must register too')
+  assert.equal(bareSlots.length, 1, 'the row must register without a settings service')
   assert.equal(added.length, 1, 'a switch that cannot be saved must not disrupt the fix')
-  assert.equal(reported.length, 1, 'the mismatch is reported once, not once per write')
-  assert.match(reported[0], /settingsScope/)
+  assert.equal(reported.length, 1, 'the first write reports, and only once')
   assert.match(reported[0], /configForms/)
-  assert.match(reported[0], /0\.1\.5-rc\.x/)
+  assert.match(reported[0], /settingsScope/)
   assert.match(reported[0], /@citisen\/dsh-ui-polish/)
+}
+
+// ── the 0.1.7 line: the entry's own configuration form ──────────────────────
+//
+// There the section is addressed by Loader entry id (`ui-polish`, the row the
+// bundle patch inserts) and read through `configForms`, whose snapshot carries the
+// stored section rather than decoded switches. A stored switch must reach the
+// fixes, and a flipped switch must reach the form — that is the whole of "the
+// toggles work on 0.1.7".
+{
+  const formWrites = []
+  const formSlots = []
+  let formValue = { wheelThroughWidthHandle: false }
+
+  const form = {
+    getSnapshot: () => ({
+      status: 'ready',
+      value: formValue,
+      revision: 6,
+      writable: true,
+      mode: 'host',
+    }),
+    subscribe: (listener) => {
+      formListener = listener
+      return () => undefined
+    },
+    set: (field, value) => {
+      formWrites.push({ op: 'set', field, value })
+      formValue = { ...formValue, [field]: value }
+      // A committed write folds its answer back into the shared mirror, which is
+      // what notifies subscribers in the browser: without this the fixture would
+      // only ever test the write half of the contract.
+      formListener?.()
+      return Promise.resolve(true)
+    },
+    unset: (field) => {
+      formWrites.push({ op: 'unset', field })
+      const { [field]: _removed, ...kept } = formValue
+      formValue = kept
+      formListener?.()
+      return Promise.resolve(true)
+    },
+  }
+
+  let formListener
+  const formCtx = {
+    effect: (execute) => {
+      const disposer = execute()
+      return { dispose: typeof disposer === 'function' ? disposer : () => undefined }
+    },
+    on: () => undefined,
+    get: () => undefined,
+    inject: (deps, callback) => {
+      if (!deps.includes('configForms')) return { dispose: () => undefined }
+      return callback(formCtx) ?? { dispose: () => undefined }
+    },
+    configForms: {
+      get: (entryId) => {
+        assert.equal(entryId, 'ui-polish', 'the form is addressed by Loader entry id')
+        return form
+      },
+    },
+    locale: { register: () => () => undefined },
+    slots: {
+      inject: (name, callback) => {
+        assert.equal(name, 'settings.general.item')
+        callback()
+      },
+      register: (options) => {
+        formSlots.push(options)
+        return () => undefined
+      },
+    },
+  }
+
+  // The stored `false` must reach the fix: the switch is off, so nothing installs.
+  const { added, removed } = installDocumentStub({ under: [] })
+  plugin.apply(formCtx)
+  assert.equal(formSlots.length, 1, 'the row must register against the 0.1.7 line')
+  assert.equal(added.length, 0, 'a stored switch that is off must not install its fix')
+
+  // Flipping it on writes through the form, and the fix follows.
+  const actions = formSlots[0].inject(formSlots[0].store.create())
+  actions.setField('wheelThroughWidthHandle', true)
+  assert.deepEqual(formWrites[0], {
+    op: 'set',
+    field: 'wheelThroughWidthHandle',
+    value: true,
+  })
+  assert.equal(added.length, 1, 'turning it on through the form must install the fix')
+
+  // Reset clears it, and the default brings the fix back without another write.
+  actions.setField('wheelThroughWidthHandle', false)
+  actions.reset()
+  assert.deepEqual(formWrites.at(-1), { op: 'unset', field: 'wheelThroughWidthHandle' })
+  assert.equal(removed.length, 1, 'the fix that was on must be disposed')
 }
 
 delete globalThis.document

@@ -11,9 +11,12 @@
 # `exports["./client"]` (`lib/client.js`) into the Web GUI.
 #
 # The quote around `name` is required: a bare YAML scalar may not start with
-# `@`. The id is deliberately short and stable — remove or disable a row by id
-# from a later layer, and never mount this package through two loader entries.
+# `@`. The id is also the settings namespace on the dsh 0.1.7 line, where a
+# section is addressed by the id of the entry that owns it — so it is the
+# `ui-polish` name the 0.1.5 line registers, and one string names the section on
+# both. Remove or disable a row by id from a later layer, and never mount this
+# package through two loader entries.
 
 - insert:
-    - id: polish
+    - id: ui-polish
       name: '@citisen/dsh-ui-polish'

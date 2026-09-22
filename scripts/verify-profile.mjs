@@ -30,8 +30,15 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 /** This plugin's package name, as declared by its own manifest. */
 const OWN_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PACKAGE_NAME = JSON.parse(readFileSync(join(OWN_ROOT, 'package.json'), 'utf8')).name
-/** The loader row id this bundle contributes (see cordis.patch.yml). */
-const ROW_ID = 'polish'
+/**
+ * The one string that names this plugin's section on either dsh line: the Loader
+ * entry id on 0.1.7+, the registered namespace on the 0.1.5-rc.x line. Read from
+ * the host half, so a patch whose id drifts from the settings namespace fails
+ * here rather than in a user's profile.
+ */
+const { POLISH_NAMESPACE: ROW_ID } = await import(
+  pathToFileURL(join(OWN_ROOT, 'lib', 'index.js')).href
+)
 
 const HOME = process.env.USERPROFILE ?? process.env.HOME ?? ''
 const DSH_HOME = process.env.DSH_HOME ?? (HOME === '' ? undefined : join(HOME, '.dsh'))
