@@ -134,7 +134,12 @@ assert.equal(typeof registration.factory, 'function')
 const plugin = registration.factory(requireStub)
 assert.equal(typeof plugin.apply, 'function', 'bundle must export apply()')
 assert.ok(Array.isArray(plugin.inject), 'bundle must export inject as an array')
-assert.deepEqual(plugin.inject, ['slots', 'locale', 'settingsScope'])
+// Settings are bound optionally, not required. A dsh that stops providing the
+// service — 0.1.7-alpha.1 replaced `settingsScope` with `configForms` — must
+// leave this plugin activated on its defaults instead of `pending` forever,
+// which is what a required entry in this list buys. The last block of this file
+// runs that composition.
+assert.deepEqual(plugin.inject, ['slots', 'locale'])
 assert.ok(Array.isArray(plugin.FIXES), 'bundle must export the fix registry')
 
 // The build must have substituted the template's identity placeholder, or the
@@ -457,15 +462,25 @@ const scope = {
 }
 let scopeRevision = 1
 
+const settingsScopeService = { bind: (spec) => (assert.equal(spec.namespace, 'ui-polish'), scope) }
+
 const ctx = {
   effect: (execute) => {
     const disposer = execute()
     return { dispose: typeof disposer === 'function' ? disposer : () => undefined }
   },
   on: () => undefined,
-  get: () => undefined,
+  get: (name) => (name === 'settingsScope' ? settingsScopeService : undefined),
+  // The optional bind under test: the service is present here, so the callback
+  // runs as it does in the browser. `settingsScope` stays on the fixture context
+  // as well, because that is the context a bound scope is read from.
+  inject: (deps, callback) => {
+    assert.deepEqual(deps, ['settingsScope'])
+    callback(ctx)
+    return { dispose: () => undefined }
+  },
   locale,
-  settingsScope: { bind: (spec) => (assert.equal(spec.namespace, 'ui-polish'), scope) },
+  settingsScope: settingsScopeService,
   slots: {
     inject: (name, callback) => {
       assert.equal(name, 'settings.general.item')
@@ -533,6 +548,77 @@ const ctx = {
   actions.reset()
   assert.deepEqual(section, {}, 'reset clears the stored switches')
   assert.equal(added.length, 3, 'the fix returns on the default')
+}
+
+// ── a composition that provides no `settingsScope` ──────────────────────────
+//
+// dsh 0.1.7-alpha.1 replaced the Web client's settings service with
+// `configForms`. A build that required the old name never activated there at
+// all: the boot audit listed this plugin as an entry that "did not activate",
+// waiting for a service that release does not have. The service is optional now,
+// and this is the composition that must still run the fixes and fill the row,
+// with one honest report — at activation, when the replacement service makes the
+// mismatch visible, and never twice.
+{
+  const incompatibleSlots = []
+  const incompatibleDictionaries = []
+  const reported = []
+  const replacementOnlyCtx = {
+    effect: (execute) => {
+      const disposer = execute()
+      return { dispose: typeof disposer === 'function' ? disposer : () => undefined }
+    },
+    on: () => undefined,
+    // Only the REPLACEMENT service exists, which is what makes the mismatch
+    // visible without waiting for anything.
+    get: (name) => (name === 'configForms' ? {} : undefined),
+    inject: (deps) => {
+      assert.deepEqual(deps, ['settingsScope'])
+      // And it never arrives: this composition started without it.
+      return { dispose: () => undefined }
+    },
+    locale: {
+      register: (namespace, dict) => {
+        incompatibleDictionaries.push({ namespace, dict })
+        return () => undefined
+      },
+    },
+    slots: {
+      inject: (name, callback) => {
+        assert.equal(name, 'settings.general.item')
+        callback()
+      },
+      register: (options, component) => {
+        incompatibleSlots.push({ options, component })
+        return () => undefined
+      },
+    },
+  }
+
+  const { added } = installDocumentStub({ under: [] })
+  const realError = console.error
+  console.error = (...args) => reported.push(args.join(' '))
+  try {
+    plugin.apply(replacementOnlyCtx)
+    assert.equal(reported.length, 1, 'a visible mismatch is reported at activation')
+    assert.equal(added.length, 1, 'the shipped defaults must still install the fix')
+    // The writes the row offers must not throw on a scope that never resolves,
+    // and must not repeat a report the page already carries.
+    const actions = incompatibleSlots[0].options.inject(incompatibleSlots[0].options.store.create())
+    actions.setField('wheelThroughWidthHandle', false)
+    actions.reset()
+  } finally {
+    console.error = realError
+  }
+
+  assert.equal(incompatibleSlots.length, 1, 'the row must register without a settings service')
+  assert.equal(incompatibleDictionaries.length, 1, 'the row copy must register too')
+  assert.equal(added.length, 1, 'a switch that cannot be saved must not disrupt the fix')
+  assert.equal(reported.length, 1, 'the mismatch is reported once, not once per write')
+  assert.match(reported[0], /settingsScope/)
+  assert.match(reported[0], /configForms/)
+  assert.match(reported[0], /0\.1\.5-rc\.x/)
+  assert.match(reported[0], /@citisen\/dsh-ui-polish/)
 }
 
 delete globalThis.document

@@ -1,6 +1,6 @@
 {
   "name": "@citisen/dsh-ui-polish",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DeepSeek Harness plugin collection: small usability fixes for the Web GUI (first fix: the mouse wheel passes through the conversation's transparent width handles)",
   "type": "module",
   "license": "MIT",

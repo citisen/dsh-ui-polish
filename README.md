@@ -2,6 +2,69 @@
 
 [English](README.md) | 中文
 
+## If dsh will not boot
+
+The three lines you are looking at are these —
+
+    Failed to load plugins
+    web boot: 3 entries did not activate
+    @citisen/dsh-ui-polish: pending (waiting for service: settingsScope)
+
+An enabled plugin row that never activates is a failed boot, not a warning: dsh refuses
+to finish starting rather than loading without the plugin. Three ways out, fastest
+first, and **all three work while dsh cannot start**. This plugin's row in the profile is
+`id: polish`, for `name: '@citisen/dsh-ui-polish'`.
+
+**1. Disable it — one entry in the profile's own patch layer**
+(`$DSH_HOME/profiles/web/cordis.patch.yml`, applied after every bundle layer):
+
+    - id: polish
+      disabled: true
+
+No command, no network, nothing to install, and deleting those two lines brings the row
+back. `dsh --profile web --dump-config` prints the composed tree — every row's id and
+package name, whoever it belongs to — and marks this row `disabled: true` once the patch
+takes effect; it loads no plugin, so it works while dsh cannot start.
+
+**2. One boot only, changing nothing** — put the same two lines in a file of your own
+and pass it as an overlay:
+
+    dsh --profile web --patch ./no-polish.yml web
+
+**3. Remove it** — one command drops the dependency *and* the bundle layer
+(`dsh.profile.bundles` is reconciled against what is installed). It forwards to pnpm in
+the profile directory and never composes the profile, so it runs while dsh cannot start:
+
+    dsh plugin --profile web remove @citisen/dsh-ui-polish
+
+It needs `pnpm` on `PATH`; without it, delete the package name from
+`dsh.profile.bundles` (and the matching `dependencies` entry) in
+`$DSH_HOME/profiles/web/package.json` by hand.
+
+**Or just get a working dsh now**: boot a clean profile from the shipped template, which
+carries none of your bundles:
+
+    dsh --profile rescue --from-default-profile web
+
+## Compatibility
+
+This build targets the dsh **0.1.5-rc.x** line — today's `latest` (`0.1.5-rc.2`) and
+`next` (`0.1.5-rc.3`). dsh `0.1.7-alpha.1` replaced the Web client's settings API: the
+`settingsScope` service this plugin binds is gone (its replacement is `configForms`), and
+the Host's `settings.register()` went with it. On that release the fixes still run on their
+shipped defaults and the row still draws, but the switches are not read or saved — and the
+reason is named in the browser console and in the dsh log rather than left to guesswork.
+
+Up to `0.1.1` this plugin waited for a service that release does not have, which is the
+failed boot at the top of this file; from `0.1.2` it activates and reports the mismatch
+instead. Either side of the line fixes it: pin dsh (`npx @deepseek-ai/dsh@0.1.5-rc.2 web`,
+or `@next`), or install a build of this plugin that supports the new API.
+
+**If `$DSH_HOME/settings.yaml.imported` exists, do not delete it.** dsh 0.1.7 imports the
+old `settings.yaml` once and renames it, and any section it does not recognize — this
+plugin's own `ui-polish` section included — stays only in the renamed file. That file is
+the last copy of those switch positions.
+
 A collection of small **usability fixes for the DeepSeek Harness Web GUI**,
 packaged as one plugin: one build, one settings namespace, one release, and one
 switch per fix so any of them can be turned off without uninstalling anything.
