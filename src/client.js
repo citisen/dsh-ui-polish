@@ -240,7 +240,18 @@ function installWheelThrough() {
     )
     if (plan === undefined) return
     event.preventDefault()
-    plan.scroller.scrollTop += plan.pixels
+    const before = plan.scroller.scrollTop
+    // Whether this dsh bridges the wheel itself is a question about behaviour, not
+    // about markup: 0.1.7's `WidthHandle` carries its own `onWheel`, 0.1.5's does
+    // not, and both render the handle as a sibling of the scroll element — a guess
+    // from that shape stood this bridge down on the line that needed it. So the
+    // scroll is queued behind the rest of the dispatch and applied only if nothing
+    // moved in the meantime: a host that already handed the wheel over keeps its own
+    // scroll (no double speed), and a host that swallowed it gets this one.
+    queueMicrotask(() => {
+      if (plan.scroller.scrollTop !== before) return
+      plan.scroller.scrollTop = before + plan.pixels
+    })
   }
   // Capture phase, so nothing between the document and the strip can consume the
   // event first, and non-passive, because taking it over means cancelling it.
@@ -537,11 +548,33 @@ function decodePolishSection(section) {
 }
 
 /**
+ * The value a 0.1.7 configuration form is effectively holding.
+ *
+ * That line keeps settings in layers: `value` is what the entry is running with
+ * (its shipped or bundle-layer config) and `user` is the profile patch the user
+ * edits. This returns the user's layer over the running one — the value a built-in
+ * row renders.
+ *
+ * @param snapshot - a form snapshot.
+ * @returns the merged section, or whichever layer exists.
+ */
+function effectiveFormValue(snapshot) {
+  const running = snapshot.value
+  const user = snapshot.user
+  if (user === null || typeof user !== 'object') return running
+  if (running === null || typeof running !== 'object') return user
+  return { ...running, ...user }
+}
+
+/**
  * Present a dsh 0.1.7 configuration form as the scope this plugin reads.
  *
- * A form already answers `getSnapshot`/`subscribe`/`set`/`unset`/`mutate`, so the
- * only gap is its value: it reports the section as stored, and this plugin reads
- * decoded switches.
+ * A form already answers `getSnapshot`/`subscribe`/`set`/`unset`/`mutate`; the gap
+ * is what its snapshot means. It reports `value` and `user` separately, a write
+ * lands in `user`, and `value` stays on the shipped defaults — so reading `value`
+ * alone is reading the defaults. That is a row that forgets every edit the moment
+ * it is reopened, a switch that will not move because the repaint after its own
+ * write shows the old value again, and a fix that never turns off.
  *
  * @param form - the configuration form for this plugin's entry.
  * @returns a scope-shaped object.
@@ -550,7 +583,7 @@ function decodedForm(form) {
   return {
     getSnapshot: () => {
       const snapshot = form.getSnapshot()
-      return { ...snapshot, value: decodePolishSection(snapshot.value) }
+      return { ...snapshot, value: decodePolishSection(effectiveFormValue(snapshot)) }
     },
     subscribe: (listener) => form.subscribe(listener),
     set: (field, value) => form.set(field, value),

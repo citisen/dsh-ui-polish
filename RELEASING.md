@@ -4,21 +4,37 @@ The runbook for changing the plugin and getting it to users. For the *why*
 behind the setup (and what it does not protect against), see
 [PUBLISHING.md](PUBLISHING.md).
 
-The next version to ship is **0.1.3** — the published `latest` is `0.1.1`.
+The next version to ship is **0.1.4**, and it is the last one: **this package is
+deprecated**, so nothing should be staged after it.
 
-`0.1.2` is staged and superseded by it: that release made the plugin survive dsh
-`0.1.7-alpha.1` without blocking the boot, but left its switches inert there.
-`0.1.3` speaks that line's settings model properly — the entry's exported `Config`
-with volatile fields, read and written through `configForms` — and renames the
-Loader row from `polish` to `ui-polish`, so one string names the section on both
-dsh lines (see the README's Compatibility section, including what that rename lets
-dsh's own legacy-settings import restore). **Reject the `0.1.2` stage** when
-staging this one; approving both would leave two stages for the same dist-tag.
+dsh absorbed the one behaviour it shipped: since `0.1.7-alpha.1` the conversation's width
+handle bridges the wheel itself (`WidthHandle` renders with an `onWheel` that scrolls the
+`[data-conversation-scroll]` beside it). The plugin is still the only thing that makes
+the wheel work over those strips on `0.1.5-rc.x`, so `0.1.4` carries the fix that gets
+both lines right rather than guessing which one it is on:
 
-`0.1.1` was the first release staged by CI and approved from there, so the OIDC
-path is no longer merely configured: it has run, and it produced a tarball with
-provenance attached. `0.1.0` was published by hand once, before trusted
-publishing could be configured for it (see
+- `0.1.3`, staged and **must not be published**, tried to stand the fix down when it
+  inferred that the host owned the wheel — from the shape of the DOM instead of from
+  what happened. Both lines render the handle as a sibling of the scroll element, so it
+  stood down on the line that has no bridge of its own and the strips swallowed the
+  wheel again. `0.1.4` queues its scroll behind the rest of the event and applies it only
+  if the host did not move the scroller first: no double speed on `0.1.7`, no dead strip
+  on `0.1.5`.
+- It also carries the settings read fix (`value` over `user` on the `0.1.7` line) and the
+  README's deprecation notice.
+
+**Reject the staged `0.1.3`**, stage `0.1.4`, and then mark every published version
+deprecated:
+
+```sh
+npm deprecate '@citisen/dsh-ui-polish' 'Deprecated: dsh does this itself since 0.1.7-alpha.1 (the width handle bridges the wheel). On 0.1.5-rc.x this version still makes the wheel pass through the strips. 0.1.4 is the final release.'
+```
+
+The published `latest` is `0.1.2`; the section below describes how releases are made
+if the package is ever revived, and `0.1.1` was the first release staged by CI and
+approved from there, so the OIDC path is no longer merely configured: it has run, and
+it produced a tarball with provenance attached. `0.1.0` was published by hand once,
+before trusted publishing could be configured for it (see
 [Bootstrapping](#bootstrapping-the-first-release)). Every release from here goes
 through staging, and a local `npm publish` failing is the setup working rather
 than the setup broken.
