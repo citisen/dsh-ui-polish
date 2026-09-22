@@ -4,9 +4,19 @@ The runbook for changing the plugin and getting it to users. For the *why*
 behind the setup (and what it does not protect against), see
 [PUBLISHING.md](PUBLISHING.md).
 
-The next version to ship is **0.1.2** — `0.1.1` is the published `latest`, and it
-was the first release staged by CI and approved from there, so the OIDC path is
-no longer merely configured: it has run, and it produced a tarball with
+The next version to ship is **0.1.3** — the published `latest` is `0.1.1`.
+
+`0.1.2` is staged and superseded by it: that release made the plugin survive dsh
+`0.1.7-alpha.1` without blocking the boot, but left its switches inert there.
+`0.1.3` speaks that line's settings model properly — the entry's exported `Config`
+with volatile fields, read and written through `configForms` — and renames the
+Loader row from `polish` to `ui-polish`, so one string names the section on both
+dsh lines (see the README's Compatibility section, including what that rename lets
+dsh's own legacy-settings import restore). **Reject the `0.1.2` stage** when
+staging this one; approving both would leave two stages for the same dist-tag.
+
+`0.1.1` was the first release staged by CI and approved from there, so the OIDC
+path is no longer merely configured: it has run, and it produced a tarball with
 provenance attached. `0.1.0` was published by hand once, before trusted
 publishing could be configured for it (see
 [Bootstrapping](#bootstrapping-the-first-release)). Every release from here goes

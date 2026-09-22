@@ -12,12 +12,12 @@
 
 「启用的条目却始终不激活」在 dsh 里算**启动失败**而不是警告：它会拒绝完成启动，而不是少个插件
 照常起来。三条出路，从快到慢，**三条都在 dsh 起不来的情况下可用**。本插件在 profile 里的行是
-`id: polish`，对应 `name: '@citisen/dsh-ui-polish'`。
+`id: ui-polish`，对应 `name: '@citisen/dsh-ui-polish'`。
 
 **1. 禁用它 —— 在 profile 自己的补丁层里加一条**
 （`$DSH_HOME/profiles/web/cordis.patch.yml`，这一层在所有 bundle 层之后应用）：
 
-    - id: polish
+    - id: ui-polish
       disabled: true
 
 不用敲命令、不用联网、不用装东西；删掉这两行它就回来了。`dsh --profile web --dump-config`
@@ -42,19 +42,35 @@
 
 ## 兼容性
 
-本构建面向 dsh **0.1.5-rc.x** 系列 —— 也就是当前的 `latest`（`0.1.5-rc.2`）和 `next`
-（`0.1.5-rc.3`）。dsh `0.1.7-alpha.1` 换掉了 Web 客户端的设置 API：本插件绑定的
-`settingsScope` 服务不存在了（替代它的是 `configForms`），宿主端的 `settings.register()`
-也一并消失。在那个版本上，各项修正仍按出厂默认值生效、设置行也照常渲染，但开关读不到也存不
-下 —— 原因会打印在浏览器控制台和 dsh 日志里，而不是留给用户去猜。
+本构建在两条 dsh 线上都能跑：**0.1.5-rc.x** 系列（也就是当前的 `latest` 和 `next`），以及
+**0.1.7-alpha.1** —— 后者的设置模型它同样会说。两条线上，这份插件的 section 都叫同一个名字
+`ui-polish`：0.1.7 线按 Loader 条目 id 定位设置，而本 bundle 的补丁正是以这个名字插入条目；
+0.1.5 线则把同一个名字注册为设置命名空间。
 
-`0.1.1` 及更早的版本会一直等一个那个版本并不存在的服务，也就是本文件开头那次启动失败；从
-`0.1.2` 起它会正常激活，并把不匹配的原因直接说出来。两边任一都能解决：把 dsh 钉住
-（`npx @deepseek-ai/dsh@0.1.5-rc.2 web`，或 `@next`），或者换成支持新 API 的插件版本。
+| 它读什么 | 0.1.5-rc.x | 0.1.7-alpha.1 |
+| --- | --- | --- |
+| 那份持久 section | `settingsScope.bind({ namespace: 'ui-polish' })` | `configForms.get('ui-polish')`，读条目自己的 `Config` |
+| 宿主契约 | `settings.register('ui-polish', schema)` | 导出的 `Config`，字段标记为 `.volatile()` |
 
-**如果存在 `$DSH_HOME/settings.yaml.imported`，不要删它。** dsh 0.1.7 会把旧的
-`settings.yaml` 导入一次并改名，凡是它不认的 section（包括本插件的 `ui-polish`）都只留在改
-名后的文件里 —— 那个文件是这些开关状态的唯一副本。
+两者都是**可选绑定**，所以两条服务都不提供的 dsh 也照样激活：插件不会一直 `pending`（那会直接
+阻断启动），也不会在激活时抛错。它按出厂默认值工作，而你在设置行上第一次动开关时，它会告诉你为
+什么存不下来。`0.1.2` 及更早的版本要求 0.1.5 那条服务，所以在 `0.1.7-alpha.1`
+上被报成「未激活」的条目；`0.1.3` 两条线都会说。
+
+### 0.1.7 改名时丢掉的设置
+
+dsh 0.1.7 会把旧的 `$DSH_HOME/settings.yaml` 导入一次 —— 每个 section 写进同名条目 —— 并把文件
+改名为 `settings.yaml.imported`。在 `0.1.3` 之前，本插件的条目叫 `polish`，于是
+`ui-polish` 这个 section 无处可去，只留在改名后的文件里。现在名字对上了，dsh 自己的导入就能把
+这些值放回去：
+
+1. 把 `$DSH_HOME/settings.yaml.imported` **复制**成 `$DSH_HOME/settings.yaml`（是复制不是移动 ——
+   导入跑之前，那个文件是唯一的记录），并且只保留条目现在仍然声明的键：dsh 会用条目自己的 schema
+   校验这个 section，只要有一个不认识的键就整段拒绝，所以上面表格没列出的键都要删掉。
+2. 用你平时用的 profile 启动一次 dsh 0.1.7。凡是现在有条目对应的 section —— 包括
+   `ui-polish` —— 都会写进那个 profile 的 Cordis patch。
+3. dsh 仍然不认的 section 会被报告出来，并继续留在 `settings.yaml.imported` 里；所以**在你把需要
+   的东西取出来之前，别删那个文件**。
 
 面向 DeepSeek Harness **Web 界面的一小组可用性修正**，打成一个插件：一套构建、一个设置命名空间、一次发布，并且每一项都有独立开关，不需要为了关掉某一项而卸载整个插件。
 
