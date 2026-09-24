@@ -62,12 +62,16 @@ git checkout main && git pull --ff-only
 git tag v0.1.2 && git push origin v0.1.2
 gh workflow run stage.yml --ref main -f dist-tag=latest -f confirm=0.1.2
 
-# 6. review, then approve (this is the only step that publishes)
+# 6. approve the `npm-publish` deployment on the run page — the staging job does
+#    not start, and no OIDC token is minted, until you do — then copy the
+#    integrity out of the run's "Release evidence" block
+
+# 7. review, then approve (this is the only step that publishes)
 npm run release -- list                  # find the stage-id
 npm run release -- view <stage-id>
-npm run release -- approve <stage-id>
+npm run release -- approve <stage-id> --expect <sha512-integrity-from-the-run>
 
-# 7. confirm users can get it
+# 8. confirm users can get it
 npm view @citisen/dsh-ui-polish dist-tags
 ```
 

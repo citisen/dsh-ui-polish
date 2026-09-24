@@ -1,28 +1,39 @@
-# Stages @citisen/dsh-ui-polish for release — the CI half of the ONLY publishing
-# path once trusted publishing is configured on npm.
+# Stages this package for release — the CI half of the ONLY publishing path.
 #
 # There is deliberately no `NPM_TOKEN` anywhere in this file. npm trusts this
-# repository and this workflow file via GitHub's OIDC identity, so no
-# long-lived credential exists to steal, leak, or forget to rotate. That trust
-# is configured at
-#   https://www.npmjs.com/package/@citisen/dsh-ui-polish/access
-# and is pinned to the exact workflow filename below; renaming or moving this
-# file breaks publishing until npm is updated to match.
+# repository and this workflow file via GitHub's OIDC identity, so no long-lived
+# credential exists to steal, leak, or forget to rotate. That trust is
+# configured on the package's npm page under "Trusted Publisher", pinned to this
+# exact workflow filename; renaming or moving this file breaks publishing until
+# npm is updated to match. In the trusted publisher's "Allowed actions" the
+# `npm publish` box is left UNCHECKED, so the grant this workflow receives can
+# only stage a tarball. A maintainer then reviews and approves it
+# (`npm run release -- approve <stage-id>`), which requires their 2FA. That
+# human step is the point: a compromised runner, a malicious commit, or a bad
+# dependency in CI cannot put a version on the registry.
 #
-# This workflow STAGES; it deliberately does not publish. In the trusted
-# publisher's "Allowed actions" the `npm publish` box is left UNCHECKED, so the
-# grant this workflow receives can only stage a tarball. A maintainer then
-# reviews and approves it (`npm run release -- approve <stage-id>`), which
-# requires their 2FA. That human step is the point: a compromised runner, a
-# malicious commit, or a bad dependency in CI cannot put a version on the
-# registry and cannot make it installable. Leaving that box checked would let
-# this workflow publish unattended, which is strictly weaker.
+# WHY THERE ARE TWO JOBS
+# The signing capability (`id-token: write`) sits in exactly one job, and that
+# job runs no repository code: no checkout, no `npm ci`, no cache, no build
+# script. Everything that can execute third-party code — dependency install
+# scripts, the build, this repository's own check scripts — runs in the build
+# job, which has no `id-token` and is asserted to have none (see check 5 of
+# .github/scripts/verify-release.mjs). The split is the point: the TanStack /
+# "Mini Shai-Hulud" compromise of May 2026 never stole an npm token, it got code
+# execution inside the job that could mint one.
+#
+# EVIDENCE
+# The build job packs the tarball once and prints its sha512 into the run
+# summary. The staging job re-hashes the same bytes and refuses to stage
+# anything else, so what a maintainer approves is exactly what was built — and
+# the integrity in the summary is what they can compare against npm.
 #
 # Trigger is manual on purpose: staging a release should be a deliberate act,
 # not a side effect of a merge.
 #
 # To release: bump "version" in package.json, commit, tag v<version>, push,
-# then Actions -> Stage release -> Run workflow, and approve the stage.
+# then Actions -> Stage release -> Run workflow, confirm the version, approve
+# the `npm-publish` deployment, and finally approve the stage on npm.
 
 name: Stage release
 
@@ -38,14 +49,12 @@ on:
           - alpha
         default: latest
       confirm:
-        description: Type the version in package.json to confirm (e.g. 0.1.0)
+        description: Type the version in package.json to confirm (e.g. 0.2.0)
         required: true
         type: string
 
-permissions:
-  # Required for the OIDC token npm exchanges for a staging grant.
-  id-token: write
-  contents: read
+# Zero permissions by default; each job opens only what it needs.
+permissions: {}
 
 concurrency:
   # One staging run at a time; never cancel one mid-flight, which could leave a
@@ -54,43 +63,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  stage:
-    runs-on: ubuntu-latest
-    # A protected environment lets you require reviewers before staging even
-    # starts. Create one named exactly this in repo Settings -> Environments,
-    # or delete this line to skip the gate.
-    environment: npm-publish
+  build:
+    name: Build and fingerprint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # No `id-token` here on purpose: this job installs dependencies and runs the
+    # repository's own scripts. verify-release.mjs fails if OIDC shows up.
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      integrity: ${{ steps.gate.outputs.integrity }}
     steps:
       - name: Check out the exact commit being released
-        uses: actions/checkout@v4
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          # Full history, so the annotated-tag ancestry check below can run.
+          # Full history, so the gate can see whether a tag points at HEAD.
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
-          # Node 24 is current LTS and satisfies npm 12's engine range, which
-          # is what provides `npm stage`.
-          node-version: 24
-          registry-url: https://registry.npmjs.org
+          node-version: '24'
+          # Deliberately no registry-url: that would write an .npmrc carrying a
+          # ${NODE_AUTH_TOKEN} placeholder, and this workflow uses no token.
 
-      - name: Install the npm CLI that can stage
+      - name: Install dependencies without running their scripts
         run: |
           set -euo pipefail
-          # Pinned to a major so a surprise release cannot change what runs.
-          npm install --global npm@12
-          npm --version
+          # --ignore-scripts: nothing in the dependency tree gets to execute
+          # code in a job that is about to build the artifact.
+          npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: Install dependencies
+      - name: Verify the shipped artifacts
         run: |
           set -euo pipefail
-          # The host half imports @deepseek-ai/schemastery as a real runtime
-          # dependency. dsh supplies it to a plugin at runtime, but the
-          # verification steps below import the host half directly, so it must
-          # be installed here too -- without this the gate dies with
-          # ERR_MODULE_NOT_FOUND and no release can ever stage.
-          npm ci
+          # The same gate a local release runs, so CI cannot pass on something
+          # the maintainer's own machine would reject.
+          npm run check
 
       - name: Read and confirm the version
         id: version
@@ -99,48 +110,97 @@ jobs:
         run: |
           set -euo pipefail
           version="$(node -p "require('./package.json').version")"
+          package="$(node -p "require('./package.json').name")"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "package.json version: $version"
+          echo "package.json: $package@$version"
           if [ "$CONFIRM" != "$version" ]; then
             echo "::error::confirmation '$CONFIRM' does not match package.json version '$version'"
             exit 1
           fi
 
-      - name: Verify the shipped artifacts
-        run: |
-          set -euo pipefail
-          # Fails if lib/client.js does not match src/client.js, then exercises
-          # the envelope, the fixes, the settings row, and the host half. This is
-          # the same gate a local release runs.
-          npm run check
-
-      - name: Refuse a version that is published or already staged
+      - name: Refuse a version that is already published
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          if npm view "@citisen/dsh-ui-polish@$VERSION" version >/dev/null 2>&1; then
-            echo "::error::@citisen/dsh-ui-polish@$VERSION is already published — bump package.json"
+          # `npm view` is a public read, so this works with no credential.
+          package="$(node -p "require('./package.json').name")"
+          if npm view "$package@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::$package@$VERSION is already published — bump package.json"
             exit 1
           fi
-          if npm stage list "@citisen/dsh-ui-polish" 2>/dev/null | grep -qF "$VERSION"; then
-            echo "::error::@citisen/dsh-ui-polish@$VERSION is already staged — approve or reject it first"
-            exit 1
-          fi
-          echo "@citisen/dsh-ui-polish@$VERSION is neither published nor staged"
+          echo "$package@$VERSION is not on the registry"
 
-      - name: Require a tag for a latest release
-        if: inputs.dist-tag == 'latest'
+      - name: Release gate — pack, inspect, fingerprint
+        id: gate
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          # A `latest` release must have the tag on HEAD; next/alpha need not.
+          REQUIRE_TAG: ${{ inputs.dist-tag == 'latest' && '1' || '0' }}
+          RELEASE_PACK_DIR: ${{ runner.temp }}/pack
+          RELEASE_EVIDENCE: ${{ runner.temp }}/release-evidence.json
+        run: node .github/scripts/verify-release.mjs
+
+      - name: Keep the tarball for the staging job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tarball
+          path: ${{ runner.temp }}/pack/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  stage:
+    name: Stage on npm (OIDC)
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    # The protected environment is the human gate: this job does not start — and
+    # therefore no OIDC token is minted — until a maintainer approves the run.
+    # Its name is part of the OIDC identity, so npm's trusted-publisher entry
+    # must list exactly this value.
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Take the tarball the build job produced
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: tarball
+          path: pkg
+
+      - name: Set up Node
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '24'
+
+      - name: Install the pinned npm CLI that can stage
+        env:
+          NPM_VERSION: 12.1.0
         run: |
           set -euo pipefail
-          # `--points-at` matches a tag on this exact commit, so a tag left on
-          # an older commit cannot be used to release something newer.
-          if ! git tag --points-at HEAD | grep -qx "v$VERSION"; then
-            echo "::error::no tag v$VERSION on $GITHUB_SHA — tag the release commit first"
+          npm install --global "npm@${NPM_VERSION}" --ignore-scripts --no-audit --no-fund
+          installed="$(npm --version)"
+          if [ "$installed" != "$NPM_VERSION" ]; then
+            echo "::error::npm version is not the pinned ${NPM_VERSION} (got ${installed})"
             exit 1
           fi
+          # A capability assertion beats a version number: this npm must really
+          # support staged publishing.
+          npm stage publish --help >/dev/null
+          echo "npm ${installed} OK (supports npm stage publish)"
+
+      - name: Refuse to stage bytes the build job did not produce
+        env:
+          EXPECTED_INTEGRITY: ${{ needs.build.outputs.integrity }}
+        run: |
+          set -euo pipefail
+          tarball="$(ls pkg/*.tgz)"
+          actual="$(node -e 'const c=require("node:crypto"),f=require("node:fs");process.stdout.write("sha512-"+c.createHash("sha512").update(f.readFileSync(process.argv[1])).digest("base64"))' "$tarball")"
+          if [ "$actual" != "$EXPECTED_INTEGRITY" ]; then
+            echo "::error::tarball integrity differs from the build job (expected $EXPECTED_INTEGRITY, got $actual)"
+            exit 1
+          fi
+          echo "$(basename "$tarball") integrity $actual matches the build job"
 
       - name: Drop any registry credential from the runner
         run: |
@@ -153,31 +213,42 @@ jobs:
           npm config set registry https://registry.npmjs.org/
 
       - name: Stage
-        id: stage
         env:
           DIST_TAG: ${{ inputs.dist-tag }}
         run: |
           set -euo pipefail
-          # No --provenance: npm attaches provenance automatically for a
-          # trusted stage/publish.
-          npm stage publish --tag "$DIST_TAG"
-          echo "staged $(node -p "require('./package.json').name + '@' + require('./package.json').version")"
+          # --ignore-scripts: the artifact is already built; nothing here should
+          # execute repository code next to the OIDC token.
+          # No --provenance: npm attaches provenance automatically for a trusted
+          # stage/publish.
+          # A duplicate version or stage is refused by the registry itself —
+          # `npm stage list` cannot be used as a pre-check, it needs a token
+          # read credential this workflow does not have.
+          npm stage publish "$(ls pkg/*.tgz)" \
+            --ignore-scripts \
+            --tag "$DIST_TAG" \
+            --access public \
+            --registry https://registry.npmjs.org/
 
       - name: Summarize
         env:
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.build.outputs.version }}
           DIST_TAG: ${{ inputs.dist-tag }}
+          INTEGRITY: ${{ needs.build.outputs.integrity }}
         run: |
           {
-            echo "## Staged: \`@citisen/dsh-ui-polish@$VERSION\` (dist-tag \`$DIST_TAG\`)"
+            echo "## Staged for review (dist-tag \`$DIST_TAG\`)"
+            echo
+            echo "- version: \`$VERSION\`"
+            echo "- integrity: \`$INTEGRITY\`"
             echo
             echo "Nothing is installable yet. A maintainer must approve the stage,"
-            echo "which requires their 2FA:"
+            echo "which requires their 2FA — and should check that the integrity npm"
+            echo "shows for the stage matches the value above:"
             echo
             echo '```sh'
             echo "npm run release -- list"
+            echo "npm run release -- view <stage-id>"
             echo "npm run release -- approve <stage-id>"
             echo '```'
-            echo
-            echo "Or: https://www.npmjs.com/package/@citisen/dsh-ui-polish"
           } >> "$GITHUB_STEP_SUMMARY"
